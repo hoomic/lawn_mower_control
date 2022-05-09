@@ -27,6 +27,8 @@ setup(
           'test_stereo_control.py = lawn_mower_control.test_stereo_control:main',
           'stereo_mapper = lawn_mower_control.stereo_mapper:main',
           'manual_control = lawn_mower_control.manual_control:main',
+          'zone_mapper = lawn_mower_control.zone_mapper:main',
+          'path_planner = lawn_mower_control.path_planner:main',
         ],
     },
 )
