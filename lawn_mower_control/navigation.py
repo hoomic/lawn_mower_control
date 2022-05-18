@@ -16,6 +16,15 @@ pose = PoseStamped().pose
 def yaw_from_quaternion(q):
   return np.arctan2(2.0 * (q.w * q.z + q.x * q.y), q.w * q.w + q.x * q.x - q.y * q.y - q.z * q.z)
 
+def get_yaw_error(target, current):
+  error = target - current
+  if abs(error) > np.pi:
+    if error > 0:
+      error -= 2 * np.pi
+    else:
+      error += 2 * np.pi
+  return error
+
 class PID():
   def __init__(self, p, i, d):
     self.p = p
@@ -93,7 +102,7 @@ class Navigator(Node):
     super().destroy_node()
 
   def goal_callback(self, goal_request):
-    self.get_logger().info("Received {} waypoints".format(len(goal_request.waypoints)))
+    self.get_logger().info("Received {} waypoints: {}".format(len(goal_request.waypoints), goal_request.waypoints))
     self.forward_pid.reset()
     self.turn_pid.reset()
     return GoalResponse.ACCEPT
@@ -120,7 +129,8 @@ class Navigator(Node):
         msg = Twist()
         target_yaw = np.arctan2(waypoint.y - pose.position.y, waypoint.x - pose.position.x)
         curr_yaw = yaw_from_quaternion(pose.orientation)
-        yaw_error = target_yaw - curr_yaw
+        yaw_error = get_yaw_error(target_yaw, curr_yaw)
+
         self.get_logger().info("yaw_error={:.3f} target_yaw={:.3f} curr_yaw={:.3f}".format(yaw_error, target_yaw, curr_yaw))
         msg.angular.z = min(self.turn_pid.get_control(yaw_error), self.get_parameter('max_angular_vel').value)
         if abs(yaw_error) > 0.05:
@@ -130,7 +140,7 @@ class Navigator(Node):
         if self.go_straight:
           msg.linear.x = min(self.forward_pid.get_control(dist), self.get_parameter('max_vel').value)
         self.cmd_vel_pub_.publish(msg)
-        self.get_logger().info("cmd_msg={}".format(msg))
+        #self.get_logger().info("cmd_msg={}".format(msg))
 
         dist = ((pose.position.x - waypoint.x) ** 2 + (pose.position.y - waypoint.y) **2) ** 0.5
         feedback_msg.distance = dist
