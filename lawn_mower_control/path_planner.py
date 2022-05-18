@@ -1,14 +1,17 @@
 import rclpy
 from rclpy.node import Node
+from rclpy.action import ActionClient
 
 from std_msgs.msg import Empty
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Point, Vector3
 from visualization_msgs.msg import Marker, MarkerArray
+from lawn_mower_interfaces.action import Waypoint
 
 import numpy as np
 from sklearn.decomposition import PCA 
 from copy import deepcopy
+from time import sleep
 
 def pose_dist(p1, p2):
   return ((p1.x - p2.x)**2 + (p1.y - p2.y)**2)**0.5
@@ -209,11 +212,16 @@ class Zone():
     x_trans_dim = self.max_trans_x - self.min_trans_x + 2
     y_trans_dim = self.max_trans_y - self.min_trans_y + 2
     self.grid_transform = np.zeros((x_trans_dim, y_trans_dim))
+    #first populate the transformed perimeter
+    for x, y in perimeter_transform:
+      x = int(np.round(x - self.min_trans_x))
+      y = int(np.round(y - self.min_trans_y))
+      self.grid_transform[x, y] = 1
+    #then fill in any gaps that may exist
     last_coord = np.round(perimeter_transform[-1] - np.array([self.min_trans_x, self.min_trans_y])).astype(int)
     for x, y in perimeter_transform:
       x = int(np.round(x - self.min_trans_x))
       y = int(np.round(y - self.min_trans_y))
-      # fill in any gaps in the perimeter of the grid
       x_diff = x - last_coord[0]
       y_diff = y - last_coord[1]
       dist = (x_diff**2 + y_diff**2) ** 0.5
@@ -224,7 +232,6 @@ class Zone():
           self.grid_transform[np.round(last_coord).astype(int)] = 1
 
       last_coord = np.array([x, y])
-      self.grid_transform[x, y] = 1
 
   def get_waypoints(self):
     """
@@ -304,6 +311,8 @@ class PathPlanner(Node):
       , "/lawn_mower/waypoint_markers"
       , 10
     )
+
+    self.waypoint_client_ = ActionClient(self, Waypoint, 'waypoint')
     self.zones = {}
 
   def process_zone(self, msg):
@@ -316,10 +325,43 @@ class PathPlanner(Node):
   def process_perimeter_mapped(self, msg):
     for zone_id, zone in self.zones.items():
       self.get_logger().info("Creating path for zone with id: {}".format(zone_id))
-      waypoints = zone.get_waypoints()
-      self.publish_waypoints(waypoints, zone_id)
+      self.waypoints = zone.get_waypoints()
+      self.publish_waypoint_markers(self.waypoints, zone_id)
+      self.send_waypoints()
 
-  def publish_waypoints(self, waypoints, zone_id):
+  def send_waypoints(self):
+    waypoint_msg = Waypoint.Goal()
+    for w in self.waypoints:
+      pt = Point()
+      pt.x, pt.y = w
+      waypoint_msg.waypoints.append(pt)
+
+    self.waypoint_client_.wait_for_server()
+    self._send_waypoint_future = self.waypoint_client_.send_goal_async(
+                                  waypoint_msg
+                                  , feedback_callback=self.feedback_callback
+                                  )
+    self._send_waypoint_future.add_done_callback(self.goal_response_callback)
+
+  def goal_response_callback(self, future):
+    goal_handle = future.result()
+    if not goal_handle.accepted:
+      self.get_logger().info("Goal rejected :(")
+      return
+    self.get_logger().info("Goal accepted :)")
+
+    self._get_result_future = goal_handle.get_result_async()
+    self._get_result_future.add_done_callback(self.get_result_callback)
+
+  def get_result_callback(self, future):
+    result = future.result().result
+    self.get_logger().info("Result: success={}".format(result.success))
+
+  def feedback_callback(self, feedback_msg):
+    feedback = feedback_msg.feedback
+    self.get_logger().info("Received feedback distance to waypoint is {:.2f}".format(feedback.distance))
+
+  def publish_waypoint_markers(self, waypoints, zone_id):
     marker_array = MarkerArray()
     for i, wp in enumerate(waypoints[:-1]):
       marker = Marker()

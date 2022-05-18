@@ -1,0 +1,8 @@
+navigator:
+  ros__parameters:
+    forward_p_gain: 0.5
+    forward_i_gain: 0.0
+    forward_d_gain: 0.01
+    turn_p_gain: 0.5
+    turn_i_gain: 0.0
+    turn_d_gain: 0.01

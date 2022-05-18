@@ -14,40 +14,34 @@ from quaternion import quaternion
 class ZoneMapper(Node):
   def __init__(self):
     super().__init__("zone_mapper")
-    self.tf_sub_ = self.create_subscription(
-      TFMessage
-      , "/tf"
-      , self.process_tf
-      , 10
-      )
 
-    self.odom_sub_ = self.create_subscription(
-      Odometry
-      , "/visual_slam/tracking/odometry"
-      , self.process_odom
+    self.pose_sub_ = self.create_subscription(
+      PoseStamped
+      , "/lawn_mower/pose"
+      , self.process_pose
       , 10
     )
-
 
     self.joystick_sub_ = self.create_subscription(
       Joy
       , '/joy'
       , self.process_joy
       , 10
-      )
-
-    self.zone = None
-    self.map_to_odom_rot = None
-    self.map_to_odom_trans = None
+    )
 
     self.path_pub_ = self.create_publisher(
       Path
       , "/lawn_mower/zones"
       , 10
-      )
+    )
 
-    self.perimeter_mapped_pub_ = self.create_publisher(Empty, "/lawn_mower/perimeter_mapped", 1)
+    self.perimeter_mapped_pub_ = self.create_publisher(
+      Empty
+      , "/lawn_mower/perimeter_mapped"
+      , 1
+    )
 
+    self.zone = None
     self.a_off_seen = True
 
   def process_joy(self, msg):
@@ -79,33 +73,13 @@ class ZoneMapper(Node):
     else:
       self.home_press_start = None
 
-  def process_tf(self, msg):
+  def process_pose(self, msg):
     if self.zone is None:
       return
-    for transform in msg.transforms:
-      if transform.header.frame_id == 'map' and transform.child_frame_id == 'odom':
-        t = transform.transform.translation
-        r = transform.transform.rotation
-        self.map_to_odom_rot = quaternion(r.w, r.x, r.y, r.z)
-        self.map_to_odom_trans = quaternion(0, t.x, t.y, t.z)
-        break
-
-  def process_odom(self, msg):
-    if self.zone is None or self.map_to_odom_rot is None:
-      return
-    pose = PoseStamped()
-    p = msg.pose.pose.position
-    pos = quaternion(0, p.x, p.y, p.z)
-    map_pos = self.map_to_odom_rot * pos * self.map_to_odom_rot.conjugate() + self.map_to_odom_trans
-    pose.pose.position.x = map_pos.x
-    pose.pose.position.y = map_pos.y
-    pose.pose.position.z = map_pos.z
-    pose.header = msg.header
-    pose.header.frame_id = 'map'
-    if not self.zone.add_perimeter(pose):
+    if not self.zone.add_perimeter(msg):
       self.get_logger().info("Zone closure detected")
-      msg = self.zone .get_path_message()
-      self.path_pub_.publish(msg)
+      path_msg = self.zone .get_path_message()
+      self.path_pub_.publish(path_msg)
       self.zone = None
 
   def exit(self):
